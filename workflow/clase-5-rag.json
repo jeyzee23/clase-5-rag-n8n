@@ -1,0 +1,844 @@
+{
+  "name": "Clase 5 · Cerebro Documental (RAG con LlamaCloud)",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Cerebro Documental — Ingesta",
+        "formDescription": "Subí el PDF que el agente va a usar como fuente de verdad, o pegá la URL de uno.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Documento",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf"
+            },
+            {
+              "fieldLabel": "URL del PDF",
+              "placeholder": "https://…/documento.pdf"
+            },
+            {
+              "fieldLabel": "Modo de carga",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Reemplazar todo lo cargado"
+                  },
+                  {
+                    "option": "Agregar a lo que ya hay"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "22a36d74-9015-4b33-a5bd-980e5cf21b2a",
+      "name": "Subir PDF",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "14b29917-45e0-4a58-8edd-f0956af1a7d6"
+    },
+    {
+      "parameters": {
+        "jsCode": "// El PDF puede venir subido (campo \"Documento\") o como link (campo \"URL del PDF\").\n// Sea cual sea, lo dejamos en el binario \"data\" y guardamos el nombre para citarlo.\nconst item = $input.first();\nconst key = Object.keys(item.binary || {})[0];\n\nif (key) {\n  const archivo = item.binary[key];\n  return [{ json: { source: archivo.fileName }, binary: { data: archivo } }];\n}\n\nconst url = (item.json['URL del PDF'] || '').trim();\nif (!url) throw new Error('Subí un PDF o pegá la URL de uno.');\n\nconst pdf = await this.helpers.httpRequest({ url, encoding: 'arraybuffer' });\nconst nombre = decodeURIComponent(url.split('?')[0].split('/').pop()) || 'documento.pdf';\nreturn [{\n  json: { source: nombre },\n  binary: { data: await this.helpers.prepareBinaryData(Buffer.from(pdf), nombre, 'application/pdf') },\n}];\n"
+      },
+      "id": "a443ca2f-ee83-46d5-b141-b70e32b86119",
+      "name": "Normalizar archivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cloud.llamaindex.ai/api/v2/parse/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "configuration",
+              "value": "{\"tier\": \"cost_effective\", \"version\": \"latest\"}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b12c90f4-1287-459c-a964-bb99ce568d4e",
+      "name": "LlamaParse: subir PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "id": "2027721e-acdf-4831-95b4-f9f9770d21d6",
+      "name": "Esperar 10 s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "webhookId": "2a8c8c81-a2b9-488d-bc77-3f2473fb10b2"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.cloud.llamaindex.ai/api/v2/parse/{{ $('LlamaParse: subir PDF').first().json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "expand",
+              "value": "markdown_full"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "da011653-2cf1-47d0-9109-e0a426bfccf8",
+      "name": "LlamaParse: ¿terminó?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e681501c-28dc-46fd-9d92-94de8ad1ce39",
+                    "leftValue": "={{ $json.job.status }}",
+                    "rightValue": "COMPLETED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Listo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cc5cd63e-553e-4ee7-9781-51a625820f21",
+                    "leftValue": "={{ $json.job.status }}",
+                    "rightValue": "FAILED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Falló"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Sigue procesando"
+        }
+      },
+      "id": "b86ce92d-c789-440e-be92-801419d2fac8",
+      "name": "¿Estado del parseo?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'LlamaParse no pudo parsear el documento: ' + ($json.job.error_message || 'sin detalle') }}"
+      },
+      "id": "6c432545-1b15-4bc0-bc5b-fae8658d758e",
+      "name": "Parseo falló",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chunking por estructura, genérico: sirve para cualquier PDF que LlamaParse pase a markdown.\n// Corta donde empieza una sección (títulos) y guarda la \"ruta\" de títulos + la página como metadata.\n// Si el documento no tiene títulos, corta por párrafos. Nunca parte un párrafo si no hace falta.\nconst MAX = 1800;      // tope de caracteres por chunk\nconst OVERLAP = 1;     // párrafos que se repiten al partir una sección larga\nconst MIN = 40;        // secciones más cortas que esto no valen un chunk (ej. un título solo)\n\nconst j = $input.first().json;\n// LlamaParse v2 devuelve el markdown completo en markdown_full (páginas separadas por \"---\")\nconst markdown = j.markdown_full ?? j.markdown ?? j.job?.markdown_full ?? j.result?.markdown_full;\nconst source = j.source ?? $('Normalizar archivo').first().json.source;\nif (!markdown) throw new Error('No llegó markdown de LlamaParse. Mirá la salida del nodo anterior.');\n\nconst limpiar = s => s.replace(/<\\/?u>/g, '').replace(/\\*\\*/g, '').replace(/^#+\\s*/, '').trim();\n\n// 1. Ruido. Lo detectamos sin saber de qué trata el documento:\n//    - encabezados y pies de página = renglones cortos que se repiten en muchas páginas\n//      (los números se ignoran: \"Informe anual 3\" y \"Informe anual 4\" cuentan como el mismo)\n//    - renglones del índice (\"Capítulo 2 ........ 14\"), separadores y números de página sueltos\nconst crudas = markdown.split('\\n');\nconst paginas = crudas.filter(l => l.trim() === '---').length + 1;\nconst clave = t => t.replace(/\\d+/g, '#');\nconst veces = {};\nfor (const l of crudas) {\n  const t = limpiar(l);\n  if (t && t.length < 120 && !t.startsWith('|')) veces[clave(t)] = (veces[clave(t)] || 0) + 1;\n}\nconst repetido = t => veces[clave(t)] >= Math.max(3, paginas * 0.3);\nconst esRuido = t =>\n  /^-{3,}$/.test(t) ||                                  // separadores\n  /(\\.{5,}|…{2,}|_{5,})\\s*\\d*\\s*$|(\\.{3,}|…)\\s*\\d+\\s*$/.test(t) || // renglones del índice\n  /^(p[áa]g(ina)?\\.?\\s*)?\\d+(\\s*(de|\\/)\\s*\\d+)?$/i.test(t) || // \"12\", \"Página 3 de 20\"\n  /^[A-ZÁÉÍÓÚÑ]{2,4}([\\s·|–-]+[A-ZÁÉÍÓÚÑ]{2,4}){0,2}$/.test(t) || // logos o siglas sueltas (\"AFA\", \"AFA LPF\", \"OMS\")\n  (!t.startsWith('|') && t.length < 120 && repetido(t)); // encabezado / pie de página\n\n// 2. ¿Este renglón es un título? ¿De qué nivel?\n//    Palabras clave comunes (las de un reglamento, un contrato o un manual) mandan sobre el nivel de \"#\",\n//    porque el parseo no es prolijo: el mismo \"Artículo\" puede venir como #, ## o solo en negrita.\nconst CLAVES = [\n  [1, /^(libro|parte|t[íi]tulo|anexo|ap[ée]ndice|part|title|annex|appendix)\\b/i],\n  [2, /^(cap[íi]tulo|secci[óo]n|unidad|m[óo]dulo|chapter|section|unit)\\b/i],\n  [3, /^(art[íi]culo|art\\.|cl[áa]usula|regla|article|clause|rule)\\s*\\d+/i],\n];\nfunction nivelDeTitulo(linea) {\n  const t = linea.trim();\n  const md = t.match(/^(#{1,6})\\s+\\S/);\n  const negrita = /^\\*\\*[^*]{2,150}\\*\\*:?$/.test(t);\n  if (!md && !negrita) return 0;                        // texto común\n  const texto = limpiar(t);\n  for (const [nivel, re] of CLAVES) if (re.test(texto)) return nivel;\n  const num = texto.match(/^(\\d+(?:\\.\\d+)*)[.)]?\\s+\\D/); // \"2.3 Alcance\" → nivel 2\n  if (num) return Math.min(num[1].split('.').length, 6);\n  return md ? md[1].length : 3;                          // \"##\" → 2 · negrita suelta → subtítulo\n}\n\n// 3. Recorrer el documento armando secciones (ruta de títulos) con sus párrafos (y la página de cada uno)\nconst ruta = [];                 // ruta[nivel] = título vigente en ese nivel\nconst secciones = [];\nlet pagina = 1;\nlet actual = { seccion: 'Inicio', parrafos: [], abierto: null };   // lo que está antes del primer título\nsecciones.push(actual);\n\nfor (const l of crudas) {\n  if (l.trim() === '---') { pagina++; continue; }\n  const t = limpiar(l);\n  if (!t) { actual.abierto = null; continue; }          // renglón vacío = fin de párrafo\n  if (esRuido(t)) continue;\n  const nivel = nivelDeTitulo(l);\n  if (nivel) {\n    ruta[nivel] = t.replace(/[.:]$/, '');\n    ruta.length = nivel + 1;                            // un título nuevo borra los de abajo\n    actual = { seccion: ruta.filter(Boolean).join(' › '), parrafos: [], abierto: null };\n    secciones.push(actual);\n  } else {\n    const renglon = l.replace(/\\*\\*/g, '').replace(/<\\/?u>/g, '').trimEnd();\n    if (actual.abierto) actual.abierto.t += '\\n' + renglon;\n    else actual.parrafos.push(actual.abierto = { t: renglon.trimStart(), p: pagina });\n  }\n}\n\n// 4. Partir cada sección en chunks de hasta MAX caracteres, por párrafos\nconst partirGrande = p => {\n  if (p.length <= MAX) return [p];\n  if (p.trimStart().startsWith('|')) {                  // tabla: por filas, repitiendo el encabezado\n    const filas = p.split('\\n'), cab = filas.slice(0, 2), out = [];\n    let buf = [...cab];\n    for (const f of filas.slice(2)) {\n      if (buf.join('\\n').length + f.length > MAX && buf.length > 2) { out.push(buf.join('\\n')); buf = [...cab]; }\n      buf.push(f);\n    }\n    out.push(buf.join('\\n'));\n    return out;\n  }\n  const renglones = p.split('\\n');                      // lista larga: por renglón\n  if (renglones.length > 1) return renglones.flatMap(partirGrande);\n  return p.split(/(?<=[.!?;])\\s+/)                      // párrafo enorme: por oración\n    .flatMap(o => o.length > MAX ? o.match(new RegExp(`.{1,${MAX}}`, 'gs')) : [o]);\n};\n\nconst INDICE = /(^|› )(índice|indice|contenidos?|tabla de contenidos?|sumario|contents|table of contents)$/i;\nconst chunks = [];\nfor (const s of secciones) {\n  if (INDICE.test(s.seccion)) continue;                 // el índice del PDF no responde nada\n  const parrafos = s.parrafos.flatMap(({ t, p }) => partirGrande(t.trim()).map(t => ({ t, p })));\n  if (parrafos.map(x => x.t).join('').length < MIN) continue;\n  let buffer = [];\n  const largo = () => buffer.map(x => x.t).join('\\n\\n').length;\n  const flush = () => {\n    if (buffer.length) chunks.push({ seccion: s.seccion, pagina: buffer[0].p, texto: buffer.map(x => x.t).join('\\n\\n') });\n  };\n  for (const x of parrafos) {\n    if (buffer.length && largo() + x.t.length > MAX) {\n      flush();\n      buffer = buffer.slice(-OVERLAP).filter(b => b.t.length + x.t.length <= MAX);\n    }\n    buffer.push(x);\n  }\n  flush();\n}\n\nif (!chunks.length) throw new Error('El documento no tiene texto útil (¿es un PDF escaneado sin texto?).');\n\nreturn chunks.map((c, i) => ({\n  json: {\n    // La ruta va dentro del texto: el embedding \"sabe\" de qué sección es\n    text: `${c.seccion}\\n\\n${c.texto}`,\n    source,\n    seccion: c.seccion,\n    pagina: c.pagina,\n    chunk: i + 1,\n    chars: c.texto.length,\n  },\n}));\n"
+      },
+      "id": "92b49a02-e143-4e9b-b27e-b3a531c152be",
+      "name": "Chunking por títulos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "mode": "list",
+          "value": "clase5-rag",
+          "cachedResultName": "clase5-rag"
+        },
+        "options": {
+          "pineconeNamespace": "documentos",
+          "clearNamespace": "={{ $('Subir PDF').first().json['Modo de carga'].startsWith('Reemplazar') }}"
+        }
+      },
+      "id": "b54e0610-5ae9-4f0c-a882-489ceff83e84",
+      "name": "Guardar en Pinecone",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.text }}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "={{ $json.source }}"
+              },
+              {
+                "name": "seccion",
+                "value": "={{ $json.seccion }}"
+              },
+              {
+                "name": "pagina",
+                "value": "={{ $json.pagina }}"
+              },
+              {
+                "name": "chunk",
+                "value": "={{ $json.chunk }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "49c3dec8-825f-4940-b174-d91bd4b13f77",
+      "name": "Cargar chunk + metadata",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1640,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 4000,
+        "chunkOverlap": 0,
+        "options": {}
+      },
+      "id": "65bfb768-ac4c-4dc6-aa16-604c5286df26",
+      "name": "No volver a cortar",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "embed-multilingual-v3.0"
+      },
+      "id": "5f93b8c4-1d60-4904-887b-01dded43a994",
+      "name": "Embeddings (ingesta)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "38e8bf40-fca8-459a-b5ca-594b17dfc8eb",
+      "name": "Chat",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        620
+      ],
+      "webhookId": "0156fe47-e2c8-409c-b2a1-adc540b606b8"
+    },
+    {
+      "parameters": {
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "Sos un asistente que responde preguntas usando SOLO los documentos cargados en la base (PDFs).\n\nREGLAS\n1. Una pregunta por vez: respondé SOLO el último mensaje del usuario. El historial sirve para entender repreguntas (\"¿y eso cuándo?\"), pero NUNCA vuelvas a responder una pregunta anterior.\n2. Buscar antes de responder: ante cualquier pregunta sobre el contenido de los documentos, usá SIEMPRE la herramienta buscar_documentos con la pregunta actual. Podés reformularla con las palabras formales que usaría el documento (ej. \"me echan\" → \"rescisión\", \"vacaciones\" → \"licencia\").\n3. Solo fuentes: respondé únicamente con lo que dicen los fragmentos que devuelve la herramienta. PROHIBIDO completar con conocimiento propio.\n4. Regla \"No sé\": si los fragmentos no responden la pregunta actual, respondé exactamente: \"No sé: eso no figura en los documentos cargados.\"\n5. Citar: terminá cada respuesta con la fuente tomada de la metadata del fragmento, formato [Fuente: archivo › sección, pág. N]. Nunca inventes una sección ni una página. Si respondés \"No sé\", no pongas fuente.\n6. Saludos y charla: respondé corto y sin usar la herramienta.\n7. Máximo 5 líneas. Tono claro, en español rioplatense.",
+          "maxIterations": 5
+        }
+      },
+      "id": "828150b2-d64a-4f1d-a006-4599a69a6bbb",
+      "name": "Agente de documentos",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        300,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "af13e55c-2994-46fc-87b3-d4c4df5e3d5e",
+      "name": "Groq",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        180,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 4
+      },
+      "id": "b7392cf5-d958-44e1-97d0-3ec927164b16",
+      "name": "Memoria",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        340,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "a337c4fa-66f2-4c7d-a8c2-b271d2bfabb4",
+      "name": "Groq (respaldo)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        180,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Busca fragmentos en los documentos PDF cargados en la base (reglamentos, manuales, informes, contratos, especificaciones, etc.). Usala SIEMPRE antes de responder una pregunta sobre su contenido. Cada fragmento trae en su metadata 'source' (archivo), 'seccion' (ruta de títulos) y 'pagina' para citar.",
+        "pineconeIndex": {
+          "__rl": true,
+          "mode": "list",
+          "value": "clase5-rag",
+          "cachedResultName": "clase5-rag"
+        },
+        "topK": 10,
+        "includeDocumentMetadata": true,
+        "useReranker": true,
+        "options": {
+          "pineconeNamespace": "documentos"
+        }
+      },
+      "id": "44782a0d-3629-4876-8f4f-4bbc7c24aefe",
+      "name": "buscar_documentos",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        520,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "rerank-v3.5",
+        "topN": 3
+      },
+      "id": "80d3a1c4-a3a6-42c1-b915-18604a451367",
+      "name": "Reranker",
+      "type": "@n8n/n8n-nodes-langchain.rerankerCohere",
+      "typeVersion": 1,
+      "position": [
+        700,
+        1020
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "embed-multilingual-v3.0"
+      },
+      "id": "5460ea16-14fa-4f8e-ae51-ffab7c185bf1",
+      "name": "Embeddings (chat)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [
+        520,
+        1020
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "aea25cde-1d2e-48db-8fac-a35b77be352f",
+      "name": "Probar búsqueda",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "38264e02-a20b-4a6f-81ad-342e7e29bd44",
+              "name": "consulta",
+              "type": "string",
+              "value": "¿qué requisitos pide el documento?"
+            },
+            {
+              "id": "2dc91beb-88b5-4291-b27e-fc952f0b9738",
+              "name": "top_k",
+              "type": "number",
+              "value": 4
+            },
+            {
+              "id": "0e7d62e9-acb1-4afa-9ac1-7288352996f1",
+              "name": "min_score",
+              "type": "number",
+              "value": 0.6
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1cf0ace5-6d3f-4713-a4b5-5b8e602ed830",
+      "name": "Perillas de búsqueda",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "pineconeIndex": {
+          "__rl": true,
+          "mode": "list",
+          "value": "clase5-rag",
+          "cachedResultName": "clase5-rag"
+        },
+        "prompt": "={{ $json.consulta }}",
+        "topK": "={{ $json.top_k }}",
+        "includeDocumentMetadata": true,
+        "options": {
+          "pineconeNamespace": "documentos"
+        }
+      },
+      "id": "642d235b-188d-49ca-b9c7-86c21c99441e",
+      "name": "Buscar en Pinecone",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        440,
+        1320
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "modelName": "embed-multilingual-v3.0"
+      },
+      "id": "b47bd3f4-6595-433b-bd79-b4135db0a7c5",
+      "name": "Embeddings (laboratorio)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [
+        440,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Minimum Score: descartamos los fragmentos que se parecen poco a la pregunta.\n// Lo que sale de acá es exactamente lo que \"lee\" el agente.\nconst { min_score, consulta } = $('Perillas de búsqueda').first().json;\n\nconst fragmentos = $input.all()\n  .map(i => ({\n    texto: i.json.document?.pageContent ?? '',\n    source: i.json.document?.metadata?.source ?? 'desconocido',\n    seccion: i.json.document?.metadata?.seccion ?? 's/sección',\n    pagina: i.json.document?.metadata?.pagina,\n    score: Number(i.json.score ?? 0),\n  }))\n  .filter(f => f.texto);\n\nconst aprobados = fragmentos.filter(f => f.score >= min_score);\n\nif (!aprobados.length) {\n  return [{ json: {\n    resultado: `SIN_RESULTADOS: ningún fragmento superó el score mínimo (${min_score}) para \"${consulta}\".`,\n    scores: fragmentos.map(f => f.score.toFixed(3)),\n  } }];\n}\n\nreturn [{ json: {\n  resultado: aprobados.map((f, n) =>\n    `### Fragmento ${n + 1} (score ${f.score.toFixed(3)})\\n${f.texto}\\n[Fuente: ${f.source} › ${f.seccion}${f.pagina ? `, pág. ${f.pagina}` : ''}]`\n  ).join('\\n\\n'),\n  scores: fragmentos.map(f => f.score.toFixed(3)),\n} }];\n"
+      },
+      "id": "a592139b-6601-48a5-8195-ac532e9f3f35",
+      "name": "Filtrar por score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1 · INGESTA (se corre una vez por documento)\nForm → **LlamaParse** (PDF → markdown con títulos y tablas) → espera hasta `COMPLETED` → **chunking por títulos** con metadata → embeddings (Cohere, 1024 dim) → **Pinecone** (namespace `documentos`).\n\nSirve para **cualquier PDF**. En el form elegís **Reemplazar** (borra lo cargado: una sola versión vigente) o **Agregar** (suma el PDF a los que ya hay).",
+        "height": 240,
+        "width": 760,
+        "color": 4
+      },
+      "id": "3aca4801-afbc-4638-8b0c-611d245442c0",
+      "name": "Nota · Carril 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2 · CHAT\nEl agente decide cuándo buscar. System prompt: **buscar antes de responder**, **citar la fuente** y la regla **\"No sé\"**.",
+        "height": 160,
+        "width": 760,
+        "color": 5
+      },
+      "id": "4d09c02a-86b9-43c0-bd36-feb23d9ae525",
+      "name": "Nota · Carril 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3 · LABORATORIO DE SCORES (se corre a mano)\nEscribí una pregunta en **Perillas**, ejecutá y mirá los **scores**: así se calibra **Top-K** y **Min score** y se responde el paso 3 del triage (\"¿la búsqueda lo encontró?\").\nEl agente (nodo *buscar_documentos*) trae 10 y el **Reranker** de Cohere se queda con los 3 mejores.",
+        "height": 170,
+        "width": 760,
+        "color": 6
+      },
+      "id": "91a044a4-0d70-49a4-ad2f-dbe9fcc30a0c",
+      "name": "Nota · Carril 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        1100
+      ]
+    }
+  ],
+  "connections": {
+    "Subir PDF": {
+      "main": [
+        [
+          {
+            "node": "Normalizar archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar archivo": {
+      "main": [
+        [
+          {
+            "node": "LlamaParse: subir PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LlamaParse: subir PDF": {
+      "main": [
+        [
+          {
+            "node": "Esperar 10 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 10 s": {
+      "main": [
+        [
+          {
+            "node": "LlamaParse: ¿terminó?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LlamaParse: ¿terminó?": {
+      "main": [
+        [
+          {
+            "node": "¿Estado del parseo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Estado del parseo?": {
+      "main": [
+        [
+          {
+            "node": "Chunking por títulos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parseo falló",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar 10 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunking por títulos": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar chunk + metadata": {
+      "ai_document": [
+        [
+          {
+            "node": "Guardar en Pinecone",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No volver a cortar": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Cargar chunk + metadata",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (ingesta)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Guardar en Pinecone",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reranker": {
+      "ai_reranker": [
+        [
+          {
+            "node": "buscar_documentos",
+            "type": "ai_reranker",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (chat)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "buscar_documentos",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat": {
+      "main": [
+        [
+          {
+            "node": "Agente de documentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente de documentos",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq (respaldo)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente de documentos",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Memoria": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente de documentos",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "buscar_documentos": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente de documentos",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Probar búsqueda": {
+      "main": [
+        [
+          {
+            "node": "Perillas de búsqueda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perillas de búsqueda": {
+      "main": [
+        [
+          {
+            "node": "Buscar en Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar en Pinecone": {
+      "main": [
+        [
+          {
+            "node": "Filtrar por score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (laboratorio)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Buscar en Pinecone",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
