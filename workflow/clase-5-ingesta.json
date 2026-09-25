@@ -1,0 +1,464 @@
+{
+  "name": "Clase 5 · Ingesta de PDFs (LlamaParse → Cohere → Pinecone)",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Cerebro Documental — Ingesta",
+        "formDescription": "Subí el PDF que el agente va a usar como fuente de verdad, o pegá la URL de uno.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Documento",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf"
+            },
+            {
+              "fieldLabel": "URL del PDF",
+              "placeholder": "https://…/documento.pdf"
+            },
+            {
+              "fieldLabel": "Modo de carga",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Reemplazar todo lo cargado"
+                  },
+                  {
+                    "option": "Agregar a lo que ya hay"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bc37618b-288c-4691-a388-79899758c48a",
+      "name": "Subir PDF",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "f5ffd125-33e0-4a10-91c1-ae97a575eb0b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// El PDF puede venir subido (campo \"Documento\") o como link (campo \"URL del PDF\").\n// Salida siempre igual: json.source = nombre del archivo (para citar) · binary.data = el PDF.\n\nconst { json, binary = {} } = $input.first();\nconst subido = Object.values(binary)[0];\nconst url = (json['URL del PDF'] ?? '').trim();\n\nconst nombreDesdeUrl = u => decodeURIComponent(u.split('?')[0].split('/').pop()) || 'documento.pdf';\n\nconst desdeArchivo = archivo => ({ source: archivo.fileName, data: archivo });\n\nconst desdeUrl = async u => {\n  const pdf = await this.helpers.httpRequest({ url: u, encoding: 'arraybuffer' });\n  const source = nombreDesdeUrl(u);\n  return { source, data: await this.helpers.prepareBinaryData(Buffer.from(pdf), source, 'application/pdf') };\n};\n\nif (!subido && !url) throw new Error('Subí un PDF o pegá la URL de uno.');\n\nconst { source, data } = subido ? desdeArchivo(subido) : await desdeUrl(url);\nreturn [{ json: { source }, binary: { data } }];\n"
+      },
+      "id": "c2f5095c-bfbc-4ffd-a196-624c7bcbe923",
+      "name": "Normalizar archivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cloud.llamaindex.ai/api/v2/parse/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "configuration",
+              "value": "{\"tier\": \"cost_effective\", \"version\": \"latest\"}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f451c125-7339-4c84-9d0a-f5f38258aced",
+      "name": "LlamaParse: subir PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "id": "fb4e7a3e-7ba1-4714-8ac3-5f05b1fc7f6d",
+      "name": "Esperar 10 s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ],
+      "webhookId": "76e5b872-6581-442a-bc18-70e91af5cd7f"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.cloud.llamaindex.ai/api/v2/parse/{{ $('LlamaParse: subir PDF').first().json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "expand",
+              "value": "markdown_full"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a33f1bb7-3a30-4486-bd6d-228ce8f46e1d",
+      "name": "LlamaParse: ¿terminó?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d8756554-8c7c-4b1e-8ab1-fa897e647673",
+                    "leftValue": "={{ $json.job.status }}",
+                    "rightValue": "COMPLETED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Listo"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "97ce0bb4-91f5-4b51-832c-a8bc40f49ae8",
+                    "leftValue": "={{ $json.job.status }}",
+                    "rightValue": "FAILED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Falló"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Sigue procesando"
+        }
+      },
+      "id": "bae3e918-1c33-412a-9db6-56842bd8f800",
+      "name": "¿Estado del parseo?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'LlamaParse no pudo parsear el documento: ' + ($json.job.error_message || 'sin detalle') }}"
+      },
+      "id": "486b852d-7881-4dd0-ac5d-4b04675b6a6a",
+      "name": "Parseo falló",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chunking por estructura: sirve para cualquier PDF que LlamaParse pase a markdown.\n// Arriba están las REGLAS (qué es ruido, qué es un título). Abajo, el pipeline que las aplica.\n\nconst CONFIG = {\n  MAX: 1800,     // tope de caracteres por chunk\n  OVERLAP: 1,    // párrafos que se repiten al partir una sección larga\n  MIN: 40,       // secciones más cortas que esto no valen un chunk (ej. un título solo)\n};\n\n// ── Reglas de ruido: renglones que se descartan ──────────────────────────────\nconst RUIDO = [\n  { que: 'separador',            es: t => /^-{3,}$/.test(t) },\n  { que: 'renglón del índice',   es: t => /(\\.{5,}|…{2,}|_{5,})\\s*\\d*\\s*$|(\\.{3,}|…)\\s*\\d+\\s*$/.test(t) },\n  { que: 'número de página',     es: t => /^(p[áa]g(ina)?\\.?\\s*)?\\d+(\\s*(de|\\/)\\s*\\d+)?$/i.test(t) },\n  { que: 'logo o sigla suelta',  es: t => /^[A-ZÁÉÍÓÚÑ]{2,4}([\\s·|–-]+[A-ZÁÉÍÓÚÑ]{2,4}){0,2}$/.test(t) },\n  { que: 'encabezado o pie',     es: (t, repetido) => !t.startsWith('|') && t.length < 120 && repetido(t) },\n];\n\n// ── Reglas de títulos: la palabra clave manda sobre la cantidad de \"#\" ───────\nconst NIVELES = [\n  { nivel: 1, re: /^(libro|parte|t[íi]tulo|anexo|ap[ée]ndice|part|title|annex|appendix)\\b/i },\n  { nivel: 2, re: /^(cap[íi]tulo|secci[óo]n|unidad|m[óo]dulo|chapter|section|unit)\\b/i },\n  { nivel: 3, re: /^(art[íi]culo|art\\.|cl[áa]usula|regla|article|clause|rule)\\s*\\d+/i },\n];\n\n// Secciones que no responden nada (el índice del PDF)\nconst SIN_VALOR = /(^|› )(índice|indice|contenidos?|tabla de contenidos?|sumario|contents|table of contents)$/i;\n\n// ── Funciones ────────────────────────────────────────────────────────────────\nconst limpiar = s => s.replace(/<\\/?u>/g, '').replace(/\\*\\*/g, '').replace(/^#+\\s*/, '').trim();\nconst esSaltoDePagina = l => l.trim() === '---';\n\n// Un renglón corto que aparece en muchas páginas es encabezado o pie (\"Informe 3\", \"Informe 4\" = el mismo).\nfunction detectorDeRepetidos(lineas) {\n  const clave = t => t.replace(/\\d+/g, '#');\n  const paginas = lineas.filter(esSaltoDePagina).length + 1;\n  const veces = lineas.map(limpiar)\n    .filter(t => t && t.length < 120 && !t.startsWith('|'))\n    .reduce((acc, t) => { acc[clave(t)] = (acc[clave(t)] || 0) + 1; return acc; }, {});\n  return t => veces[clave(t)] >= Math.max(3, paginas * 0.3);\n}\n\n// 0 = texto común. 1..6 = título de ese nivel.\nfunction nivelDeTitulo(linea) {\n  const t = linea.trim();\n  const numeral = t.match(/^(#{1,6})\\s+\\S/);\n  const negrita = /^\\*\\*[^*]{2,150}\\*\\*:?$/.test(t);\n  if (!numeral && !negrita) return 0;\n  const texto = limpiar(t);\n  const porClave = NIVELES.find(n => n.re.test(texto));\n  if (porClave) return porClave.nivel;\n  const numerado = texto.match(/^(\\d+(?:\\.\\d+)*)[.)]?\\s+\\D/);   // \"2.3 Alcance\" → nivel 2\n  if (numerado) return Math.min(numerado[1].split('.').length, 6);\n  return numeral ? numeral[1].length : 3;                         // \"##\" → 2 · negrita suelta → 3\n}\n\n// Recorre el documento y arma [{ seccion: 'TÍTULO I › Artículo 2', parrafos: [{ t, p }] }]\nfunction agruparEnSecciones(lineas, esRuido) {\n  const ruta = [];\n  const secciones = [{ seccion: 'Inicio', parrafos: [] }];\n  let pagina = 1, abierto = null;\n  for (const linea of lineas) {\n    if (esSaltoDePagina(linea)) { pagina++; continue; }\n    const t = limpiar(linea);\n    if (!t) { abierto = null; continue; }                          // renglón vacío = fin de párrafo\n    if (esRuido(t)) continue;\n    const nivel = nivelDeTitulo(linea);\n    if (nivel) {\n      ruta[nivel] = t.replace(/[.:]$/, '');\n      ruta.length = nivel + 1;                                      // un título nuevo borra los de abajo\n      secciones.push({ seccion: ruta.filter(Boolean).join(' › '), parrafos: [] });\n      abierto = null;\n    } else {\n      const renglon = linea.replace(/\\*\\*/g, '').replace(/<\\/?u>/g, '').trimEnd();\n      if (abierto) abierto.t += '\\n' + renglon;\n      else secciones.at(-1).parrafos.push(abierto = { t: renglon.trimStart(), p: pagina });\n    }\n  }\n  return secciones;\n}\n\n// Un párrafo más largo que MAX se parte: tablas por filas (repitiendo encabezado), listas por renglón, texto por oración.\nfunction partirGrande(p) {\n  if (p.length <= CONFIG.MAX) return [p];\n  if (p.trimStart().startsWith('|')) {\n    const todas = p.split('\\n'), cab = todas.slice(0, 2);\n    return todas.slice(2).reduce((grupos, fila) => {\n      const actual = grupos.at(-1);\n      if (actual.join('\\n').length + fila.length > CONFIG.MAX && actual.length > 2) grupos.push([...cab, fila]);\n      else actual.push(fila);\n      return grupos;\n    }, [[...cab]]).map(g => g.join('\\n'));\n  }\n  const renglones = p.split('\\n');\n  if (renglones.length > 1) return renglones.flatMap(partirGrande);\n  return p.split(/(?<=[.!?;])\\s+/)\n    .flatMap(o => o.length > CONFIG.MAX ? o.match(new RegExp(`.{1,${CONFIG.MAX}}`, 'gs')) : [o]);\n}\n\n// Junta párrafos hasta MAX; al cortar, repite los últimos OVERLAP párrafos en el chunk siguiente.\nfunction empaquetar({ seccion, parrafos }) {\n  const piezas = parrafos.flatMap(({ t, p }) => partirGrande(t.trim()).map(t => ({ t, p })));\n  if (piezas.map(x => x.t).join('').length < CONFIG.MIN) return [];\n  const largo = grupo => grupo.map(x => x.t).join('\\n\\n').length;\n  const grupos = piezas.reduce((gs, x) => {\n    const actual = gs.at(-1);\n    if (actual.length && largo(actual) + x.t.length > CONFIG.MAX) {\n      gs.push([...actual.slice(-CONFIG.OVERLAP).filter(b => b.t.length + x.t.length <= CONFIG.MAX), x]);\n    } else actual.push(x);\n    return gs;\n  }, [[]]);\n  return grupos.filter(g => g.length)\n    .map(g => ({ seccion, pagina: g[0].p, texto: g.map(x => x.t).join('\\n\\n') }));\n}\n\n// ── Pipeline ─────────────────────────────────────────────────────────────────\nconst j = $input.first().json;\nconst markdown = j.markdown_full ?? j.markdown ?? j.job?.markdown_full ?? j.result?.markdown_full;\nif (!markdown) throw new Error('No llegó markdown de LlamaParse. Mirá la salida del nodo anterior.');\nconst source = j.source ?? $('Normalizar archivo').first().json.source;\n\nconst lineas = markdown.split('\\n');\nconst repetido = detectorDeRepetidos(lineas);\nconst esRuido = t => RUIDO.some(regla => regla.es(t, repetido));\n\nconst chunks = agruparEnSecciones(lineas, esRuido)\n  .filter(s => !SIN_VALOR.test(s.seccion))\n  .flatMap(empaquetar);\n\nif (!chunks.length) throw new Error('El documento no tiene texto útil (¿es un PDF escaneado sin texto?).');\n\nreturn chunks.map((c, i) => ({\n  json: {\n    text: `${c.seccion}\\n\\n${c.texto}`,   // la ruta va dentro del texto: el embedding \"sabe\" de qué sección es\n    source,\n    seccion: c.seccion,\n    pagina: c.pagina,\n    chunk: i + 1,\n    chars: c.texto.length,\n  },\n}));\n"
+      },
+      "id": "4b258e30-118b-47b8-99f6-5ae98689698b",
+      "name": "Chunking por títulos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "mode": "list",
+          "value": "clase5-rag",
+          "cachedResultName": "clase5-rag"
+        },
+        "options": {
+          "pineconeNamespace": "documentos",
+          "clearNamespace": "={{ $('Subir PDF').first().json['Modo de carga'].startsWith('Reemplazar') }}"
+        }
+      },
+      "id": "7dfa76b8-b58a-4f13-b33a-2c0f8154b615",
+      "name": "Guardar en Pinecone",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        1560,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.text }}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "source",
+                "value": "={{ $json.source }}"
+              },
+              {
+                "name": "seccion",
+                "value": "={{ $json.seccion }}"
+              },
+              {
+                "name": "pagina",
+                "value": "={{ $json.pagina }}"
+              },
+              {
+                "name": "chunk",
+                "value": "={{ $json.chunk }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "f12b1289-d02e-46b5-b0d1-6743c9514091",
+      "name": "Cargar chunk + metadata",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1640,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 4000,
+        "chunkOverlap": 0,
+        "options": {}
+      },
+      "id": "1ca35e40-0131-4626-b874-44577b665bff",
+      "name": "No volver a cortar",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "embed-multilingual-v3.0"
+      },
+      "id": "04e63712-dce9-4192-8ae5-62e56315c798",
+      "name": "Embeddings (ingesta)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsCohere",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## INGESTA (se corre una vez por documento)\nForm → **LlamaParse** (PDF → markdown con títulos y tablas) → espera hasta `COMPLETED` → **chunking por títulos** con metadata → embeddings (Cohere, 1024 dim) → **Pinecone** (namespace `documentos`).\n\nSirve para **cualquier PDF**. En el form elegís **Reemplazar** (borra lo cargado: una sola versión vigente) o **Agregar** (suma el PDF a los que ya hay).",
+        "height": 240,
+        "width": 760,
+        "color": 4
+      },
+      "id": "de46937f-45b9-48a6-b995-7f0256af3a91",
+      "name": "Nota · Carril 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -320
+      ]
+    }
+  ],
+  "connections": {
+    "Subir PDF": {
+      "main": [
+        [
+          {
+            "node": "Normalizar archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar archivo": {
+      "main": [
+        [
+          {
+            "node": "LlamaParse: subir PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LlamaParse: subir PDF": {
+      "main": [
+        [
+          {
+            "node": "Esperar 10 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar 10 s": {
+      "main": [
+        [
+          {
+            "node": "LlamaParse: ¿terminó?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LlamaParse: ¿terminó?": {
+      "main": [
+        [
+          {
+            "node": "¿Estado del parseo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Estado del parseo?": {
+      "main": [
+        [
+          {
+            "node": "Chunking por títulos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parseo falló",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar 10 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunking por títulos": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Pinecone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cargar chunk + metadata": {
+      "ai_document": [
+        [
+          {
+            "node": "Guardar en Pinecone",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No volver a cortar": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Cargar chunk + metadata",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (ingesta)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Guardar en Pinecone",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
