@@ -12,9 +12,9 @@ Un PDF entra por un formulario, por archivo o por URL. **LlamaParse** lo pasa a 
 
 La ingesta en Pinecone no salió en vivo. Acá está el replay: la grabación real, acelerada donde había esperas, con una **barra arriba que marca en qué nodo está el workflow** en cada momento.
 
-[![Replay clase 5: ingesta de un PDF en Pinecone](workflow/replay-poster.jpg)](workflow/replay-clase-5-ingesta-pinecone.mp4)
+[![Replay clase 5: ingesta de un PDF en Pinecone](workflow/replay-poster.jpg)](https://jeyzee23.github.io/clase-5-rag-n8n/workflow/replay-clase-5-ingesta-pinecone.mp4)
 
-> ▶️ Clic en la imagen para abrir el video ([`workflow/replay-clase-5-ingesta-pinecone.mp4`](workflow/replay-clase-5-ingesta-pinecone.mp4)).
+> ▶️ Clic en la imagen para verlo en el navegador ([link directo](https://jeyzee23.github.io/clase-5-rag-n8n/workflow/replay-clase-5-ingesta-pinecone.mp4)). El archivo está en [`workflow/replay-clase-5-ingesta-pinecone.mp4`](workflow/replay-clase-5-ingesta-pinecone.mp4).
 
 <!-- REPLAY-VIDEO: para que se vea el reproductor adentro del README, editá este archivo en GitHub, arrastrá el .mp4 en esta línea y dejá el link https://github.com/user-attachments/assets/... que genera, solo en su renglón. -->
 
